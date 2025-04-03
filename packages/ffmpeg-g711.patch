@@ -1,0 +1,114 @@
+diff --git a/libavformat/mpeg.c b/libavformat/mpeg.c
+index 4d732aaf86..4563c5e415 100644
+--- a/libavformat/mpeg.c
++++ b/libavformat/mpeg.c
+@@ -33,6 +33,7 @@
+ /* demux code */
+ 
+ #define MAX_SYNC_SIZE 100000
++#define MPEG_MAX_PROBE_PACKETS 200
+ 
+ static int check_pes(const uint8_t *p, const uint8_t *end)
+ {
+@@ -523,8 +524,64 @@ redo:
+     /* now find stream */
+     for (i = 0; i < s->nb_streams; i++) {
+         st = s->streams[i];
+-        if (st->id == startcode)
++        if (st->id == startcode) {
++             if (st->codecpar->codec_id == AV_CODEC_ID_NONE) {
++                es_type = m->psm_es_type[startcode & 0xff];
++                if (es_type == STREAM_TYPE_VIDEO_MPEG1) {
++                    codec_id = AV_CODEC_ID_MPEG2VIDEO;
++                    type     = AVMEDIA_TYPE_VIDEO;
++                } else if (es_type == STREAM_TYPE_VIDEO_MPEG2) {
++                    codec_id = AV_CODEC_ID_MPEG2VIDEO;
++                    type     = AVMEDIA_TYPE_VIDEO;
++                } else if (es_type == STREAM_TYPE_AUDIO_MPEG1 ||
++                           es_type == STREAM_TYPE_AUDIO_MPEG2) {
++                    codec_id = AV_CODEC_ID_MP3;
++                    type     = AVMEDIA_TYPE_AUDIO;
++                } else if (es_type == STREAM_TYPE_AUDIO_AAC) {
++                    codec_id = AV_CODEC_ID_AAC;
++                    type     = AVMEDIA_TYPE_AUDIO;
++                } else if (es_type == STREAM_TYPE_VIDEO_MPEG4) {
++                    codec_id = AV_CODEC_ID_MPEG4;
++                    type     = AVMEDIA_TYPE_VIDEO;
++                } else if (es_type == STREAM_TYPE_VIDEO_H264) {
++                    codec_id = AV_CODEC_ID_H264;
++                    type     = AVMEDIA_TYPE_VIDEO;
++                } else if (es_type == STREAM_TYPE_VIDEO_HEVC) {
++                    codec_id = AV_CODEC_ID_HEVC;
++                    type     = AVMEDIA_TYPE_VIDEO;
++                } else if (es_type == STREAM_TYPE_VIDEO_VVC) {
++                    codec_id = AV_CODEC_ID_VVC;
++                    type     = AVMEDIA_TYPE_VIDEO;
++                } else if (es_type == STREAM_TYPE_AUDIO_AC3) {
++                    codec_id = AV_CODEC_ID_AC3;
++                    type     = AVMEDIA_TYPE_AUDIO;
++                } else if (es_type == STREAM_TYPE_AUDIO_PCM_ALAW) {
++                    codec_id = AV_CODEC_ID_PCM_ALAW;
++                    type     = AVMEDIA_TYPE_AUDIO;
++                } else if (es_type == STREAM_TYPE_AUDIO_PCM_MULAW) {
++                    codec_id = AV_CODEC_ID_PCM_MULAW;
++                    type     = AVMEDIA_TYPE_AUDIO;
++                } else {
++                    codec_id = AV_CODEC_ID_NONE;
++                    type     = AVMEDIA_TYPE_UNKNOWN;
++                }
++                if (codec_id != AV_CODEC_ID_NONE && st->codecpar->codec_type == type) {
++                    st->codecpar->codec_id = codec_id;
++                    sti = ffstream(st);
++                    sti->probe_packets = MPEG_MAX_PROBE_PACKETS;
++                    if (st->codecpar->codec_id == AV_CODEC_ID_PCM_MULAW
++                       || st->codecpar->codec_id == AV_CODEC_ID_PCM_ALAW) {
++                       st->codecpar->ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_MONO;
++                       st->codecpar->sample_rate = 8000;
++                       sti->request_probe = 0;
++                       sti->need_context_update = 1;
++                    }
++                    av_log(s, AV_LOG_INFO, "modify stream:%d codec_type:%d codec_id:0x%x codec_name:%s\n",
++                        st->index, st->codecpar->codec_type, st->codecpar->codec_id, avcodec_get_name(st->codecpar->codec_id));
++                }
++            }
+             goto found;
++		}
+     }
+ 
+     es_type = m->psm_es_type[startcode & 0xff];
+@@ -556,10 +613,10 @@ redo:
+     } else if (es_type == STREAM_TYPE_AUDIO_AC3) {
+         codec_id = AV_CODEC_ID_AC3;
+         type     = AVMEDIA_TYPE_AUDIO;
+-    } else if (es_type == 0x90) {
++    } else if (es_type == STREAM_TYPE_AUDIO_PCM_ALAW) {
+         codec_id = AV_CODEC_ID_PCM_ALAW;
+         type     = AVMEDIA_TYPE_AUDIO;
+-    } else if (m->imkh_cctv && es_type == 0x91) {
++    } else if (es_type == STREAM_TYPE_AUDIO_PCM_MULAW) {
+         codec_id = AV_CODEC_ID_PCM_MULAW;
+         type     = AVMEDIA_TYPE_AUDIO;
+     } else if (startcode >= 0x1e0 && startcode <= 0x1ef) {
+@@ -588,7 +645,7 @@ redo:
+             codec_id = AV_CODEC_ID_PCM_ALAW;
+             request_probe = 50;
+         } else {
+-            codec_id = AV_CODEC_ID_MP2;
++            //codec_id = AV_CODEC_ID_MP2;
+             if (m->imkh_cctv)
+                 request_probe = 25;
+         }
+diff --git a/libavformat/mpeg.h b/libavformat/mpeg.h
+index 20592eb184..19d3e0572c 100644
+--- a/libavformat/mpeg.h
++++ b/libavformat/mpeg.h
+@@ -61,6 +61,9 @@
+ 
+ #define STREAM_TYPE_AUDIO_AC3       0x81
+ 
++#define STREAM_TYPE_AUDIO_PCM_ALAW  0x90
++#define STREAM_TYPE_AUDIO_PCM_MULAW 0x91
++
+ static const int lpcm_freq_tab[4] = { 48000, 96000, 44100, 32000 };
+ 
+ /**
